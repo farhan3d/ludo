@@ -3,17 +3,18 @@ import pygame
 import random
 
 
-SCREEN_SIZE = [600, 600]                    # the base canvas size
-ROW_COUNT = 15                              # board size adjusts to this value
-TILE_BOUNDARY_COLOR = (0, 204, 204)         # color of main movement tiles
-TILE_CENTER_COLOR = (255, 178, 102)         # color of the safe zone center tiles
-TILE_START_COLOR = (255, 255, 0)            # color of the start tile in tiles linked list
-TILE_PATH_MARKER = (255, 0, 255)            # marker color for path tiles
-TILE_SIZE = math.floor(ROW_COUNT * 2.25)    # a tile size adjusted from board size
+SCREEN_SIZE = [600, 600]
+ROW_COUNT = 15
+TILE_BOUNDARY_COLOR = (0, 204, 204)
+TILE_CENTER_COLOR = (255, 178, 102)
+TILE_START_COLOR = (255, 255, 0)
+TILE_PATH_MARKER = (255, 0, 255)
+TILE_SIZE = math.floor(ROW_COUNT * 2.25)
 PLAYER_RED = (204, 0, 0)
 PLAYER_BLUE = (51, 51, 255)
-MOVE_SPEED = 5
-done = False                                # simple little bool to manage game loop
+PIECE_SIZE = 13
+MOVE_SPEED = 20
+DECELERATION = 0.25
 
 
 pygame.init()
@@ -26,17 +27,18 @@ class Player:
         home_piece = None
         for i in range(0, 4):
             if self.pieces[i].is_home:
-                home_piece = self.piece[i]
+                home_piece = self.pieces[i]
         return home_piece
 
     """function should ideally return a piece based on player
     preference, but for now we will push the first piece found
     free in the list"""
-    def get_free_piece():
+    def get_free_piece(self):
         free_piece = None
         for i in range(0, 4):
-            if self.pieces[i].is_home == False:
+            if self.pieces[i].is_home is False:
                 free_piece = self.piece[i]
+                break
         return free_piece
 
     def __init__(self, screen, color, name, location_set):
@@ -45,16 +47,47 @@ class Player:
         self.location_set = location_set
         for i in range(0, 4):
             self.pieces.append(Piece(screen, self, self.location_set[i], i + 1,
-                                     10, color))
+                                     PIECE_SIZE, color))
 
 
 class Piece:
 
-    def move_piece(self, destination_tile):
-        pass
+    def move_piece(self, screen):
+        if self.target_tile:
+            target_location = self.target_tile.location
+            computed_vector = [target_location[0] - self.location[0],
+                               target_location[1] - self.location[1]]
+            vector_magnitude = math.sqrt(computed_vector[0]**2 +
+                                         computed_vector[1]**2)
+            computed_vector = [computed_vector[0] / vector_magnitude,
+                               computed_vector[1] / vector_magnitude]
+            current_distance = math.sqrt((target_location[0] -
+                                          self.location[0])**2 +
+                                         (target_location[1] -
+                                          self.location[1])**2)
+            self.current_move_speed = current_distance * DECELERATION
+            if current_distance < 5:
+                self.location = [math.ceil(self.location[0] + computed_vector[0] *
+                                 self.current_move_speed), math.ceil(self.location[1] +
+                                 computed_vector[1] * self.current_move_speed)]
+            if current_distance < 1:
+                self.location = self.target_tile.location
+            else:
+                self.location = [self.location[0] + computed_vector[0] *
+                                 self.current_move_speed, self.location[1] +
+                                 computed_vector[1] * self.current_move_speed]
+            self.current_move_speed *= DECELERATION
+            self.draw_piece(screen)
+            if self.location == self.target_tile.location:
+                self.target_tile = None
+                return True
+            else:
+                return False
 
     def draw_piece(self, screen):
-        pygame.draw.circle(screen, self.color, self.location, self.size)
+        self.location = [int(self.location[0]), int(self.location[1])]
+        circle = pygame.draw.circle(screen, self.color, self.location, self.size)
+        return circle
 
     def __init__(self, screen, player, location, number, size, color):
         self.id = number
@@ -62,17 +95,20 @@ class Piece:
         self.current_tile = None
         self.location = location
         self.home_location = location
+        self.target_tile = None
         self.player = player
         self.color = color
         self.is_home = True
-        self.draw_piece(screen)
+        self.current_move_speed = MOVE_SPEED
+        self.geom = self.draw_piece(screen)
 
 
 class Tile:
 
     def __init__(self, screen, size, location_arr, color, state, tile_type,
                  is_path=None):
-        self.location = location_arr
+        self.location = [math.ceil(location_arr[0] + TILE_SIZE / 2),
+                         math.ceil(location_arr[1] + TILE_SIZE / 2)]
         self.color = color
         self.state = state
         self.type = tile_type
@@ -95,17 +131,16 @@ class Board:
                 self.start_tile.next == self.tiles_collection[i]
                 self.tiles_collection[i].previous == self.start_tile
                 previous_tile = self.tiles_collection[i]
-        if previous_tile != None:
+        if previous_tile is not None:
             for k in range(len(self.tiles_collection)):
                 for j in range(len(self.tiles_collection)):
                     if (self.is_next_by_distance(self.tiles_collection[j],
-                        previous_tile) and (self.tiles_collection[j].is_path == True) and
-                        (self.tiles_collection[j].next == None) and
-                        (self.tiles_collection[j].previous == None)):
+                        previous_tile) and (self.tiles_collection[j].is_path is True) and
+                        (self.tiles_collection[j].next is None) and
+                        (self.tiles_collection[j].previous is None)):
                         previous_tile.next = self.tiles_collection[j]
                         self.tiles_collection[j].previous = previous_tile
                         previous_tile = self.tiles_collection[j]
-
 
     def is_next_by_distance(self, tile1, tile2):
         compare_dist = int(self.base_size / ROW_COUNT)
@@ -115,6 +150,9 @@ class Board:
                                     loc2[1])**2))
         return compare_dist == actual_dist
 
+    def redraw_pieces(self, player):
+        for piece in player.pieces:
+            piece.draw_piece(self.screen)
 
     def create_board(self):
         row_inc = int((self.base_size / ROW_COUNT) * 0.5)
@@ -126,7 +164,7 @@ class Board:
                 for column in range(0, ROW_COUNT):
                     if (column < half_board_count or column > half_board_count
                        + 2):
-                        if (row == 7):
+                        if (row == half_board_count + 1):
                             color = TILE_CENTER_COLOR
                             tile_type = 1
                             self.center_y = row_inc
@@ -149,7 +187,7 @@ class Board:
                 for column in range(0, ROW_COUNT):
                     if (column > half_board_count - 1 and column <
                         half_board_count + 3):
-                        if column == 7:
+                        if column == half_board_count + 1:
                             color = TILE_CENTER_COLOR
                             tile_type = 1
                             self.center_x = vertical_column_inc
@@ -162,19 +200,17 @@ class Board:
                             color = TILE_BOUNDARY_COLOR
                             tile_type = 0
                             is_path = True
+                        new_tile = Tile(self.screen, TILE_SIZE,
+                                        [vertical_column_inc, row_inc], color,
+                                        0, tile_type, is_path)
                         if (column == half_board_count and row == ROW_COUNT - 1):
-                            color = TILE_START_COLOR
-                            new_tile = Tile(self.screen, TILE_SIZE,
-                                            [vertical_column_inc, row_inc], color,
-                                            0, tile_type, is_path)
                             self.start_tile = new_tile
-                        else:
-                            new_tile = Tile(self.screen, TILE_SIZE,
-                                            [vertical_column_inc, row_inc], color,
-                                            0, tile_type, is_path)
+                            self.start_tile_player1 = self.start_tile
+                        if (column == half_board_count + 2 and row == 0):
+                            self.start_tile_player2 = new_tile
                         self.tiles_collection[tile_num] = new_tile
                         tile_num += 1
-                        if (column == 7) and ((row == half_board_count - 1) or \
+                        if (column == half_board_count + 1) and ((row == half_board_count - 1) or \
                            (row == half_board_count + 3)):
                             decrement = int(self.base_size / ROW_COUNT)
                             new_tile = Tile(self.screen, TILE_SIZE,
@@ -207,12 +243,13 @@ class Board:
         right_set.append([cell_size * ROW_COUNT - cell_size * 3, cell_size + cell_size * 3])
         self.location_sets.append(right_set)
 
-
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_SIZE[0],
                                                SCREEN_SIZE[1]))
         self.tiles_collection = {}
         self.start_tile = None
+        self.start_tile_player1 = None
+        self.start_tile_player2 = None
         self.center_x = 0
         self.center_y = 0
         self.location_sets = []
@@ -235,29 +272,58 @@ class Ludo:
                               board.location_sets[0])
         self.player2 = Player(board.screen, PLAYER_RED, 'player2',
                               board.location_sets[1])
+        self.game(board)
+
+    def game(self, board):
+        current_player = self.player1
+        turn_under_progress = False
+        dice_num = 0
+        move_current_piece = False
+        current_piece = None
+        done = False
+        while not done:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    done = True
+                if event.type == pygame.KEYDOWN and move_current_piece is False:
+                    if (event.key == pygame.K_SPACE and
+                        turn_under_progress is False):
+                        dice_num = self.roll_dice()
+                        turn_under_progress = True
+            if turn_under_progress:
+                if dice_num == 6:
+                    player_home_piece = current_player.get_home_piece()
+                    if player_home_piece:
+                        current_piece = player_home_piece
+                        if current_player == self.player1:
+                            current_piece.target_tile = board.start_tile_player1
+                        else:
+                            current_piece.target_tile = board.start_tile_player2
+                        move_current_piece = True
+                else:
+                    turn_under_progress = False
+            if move_current_piece:
+                target_reached = current_piece.move_piece(board.screen)
+                if target_reached is True:
+                    move_current_piece = False
+                    turn_under_progress = False
+                    if (current_piece.location == board.start_tile_player1.location or
+                        current_piece.location == board.start_tile_player2.location):
+                        current_piece.is_home = False
+                    if current_player == self.player1:
+                        current_player = self.player2
+                    else:
+                        current_player = self.player1
+
+            board.screen.fill((0, 0, 0))
+            board.redraw_pieces(self.player1)
+            board.redraw_pieces(self.player2)
+            board.create_board()
+            pygame.display.flip()
+            clock.tick(30)
 
 
 if __name__ == "__main__":
     board = Board()
     game = Ludo(board)
-    current_player = game.player1
-    turn_under_progress = False
-    dice_num = 0
-    move_current_piece = False
-    while not done:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                done = True
-            if event.type == pygame.KEYDOWN:
-                if (event.key == pygame.K_SPACE and
-                    turn_under_progress == False):
-                    dice_num = game.roll_dice()
-                    turn_under_progress = True
-        if turn_under_progress:
-            if dice_num == 6:
-                pass
-        if move_current_piece:
-            pass
 
-        pygame.display.flip()
-        clock.tick(30)
