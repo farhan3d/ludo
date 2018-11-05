@@ -277,6 +277,13 @@ class Board:
                           cell_size * 3])
         self.location_sets.append(right_set)
 
+    def update_dice_text(self, text, color):
+        self.dice_text_surf = self.dice_text.render(text, False, color)
+        self.screen.blit(self.dice_text_surf, (SCREEN_SIZE[0] / 2 -
+                                               TILE_SIZE / 1.75,
+                                               SCREEN_SIZE[1] / 2 -
+                                               TILE_SIZE))
+
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_SIZE[0],
                                                SCREEN_SIZE[1]))
@@ -342,6 +349,11 @@ class Ludo:
                         dice_num = self.roll_dice()
                         turn_under_progress = True
             if turn_under_progress and move_current_piece is False:
+                if self.current_player == self.player1:
+                    color = PLAYER_BLUE
+                else:
+                    color = PLAYER_RED
+                board.update_dice_text(str(dice_num), color)
                 if dice_num == 6:
                     player_home_piece = self.current_player.get_home_piece()
                     if player_home_piece:
