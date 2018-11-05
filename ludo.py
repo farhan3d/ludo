@@ -64,8 +64,12 @@ class Player:
 class Piece:
 
     def move_piece(self, screen):
-        if self.target_tile:
-            target_location = self.target_tile.location
+        if self.target_tile or self.target_home_location:
+            target_location = None
+            if self.target_home_location:
+                target_location = self.target_home_location
+            else:
+                target_location = self.target_tile.location
             computed_vector = [target_location[0] - self.location[0],
                                target_location[1] - self.location[1]]
             vector_magnitude = math.sqrt(computed_vector[0]**2 +
@@ -89,12 +93,20 @@ class Piece:
                                  computed_vector[1] * self.current_move_speed]
             self.current_move_speed *= DECELERATION
             self.draw_piece(screen)
-            if self.location == self.target_tile.location:
-                self.current_tile = self.target_tile
-                self.target_tile = None
-                return True
+            if self.target_home_location:
+                if self.location == self.target_home_location:
+                    self.target_home_location = None
+                    self.current_tile = None
+                    return True
+                else:
+                    return False
             else:
-                return False
+                if self.location == self.target_tile.location:
+                    self.current_tile = self.target_tile
+                    self.target_tile = None
+                    return True
+                else:
+                    return False
 
     def draw_piece(self, screen):
         self.location = [int(self.location[0]), int(self.location[1])]
@@ -107,6 +119,7 @@ class Piece:
         self.location = location
         self.home_location = location
         self.target_tile = None
+        self.target_home_location = None
         self.player = player
         self.color = color
         self.is_home = True
@@ -316,6 +329,7 @@ class Ludo:
         self.player2 = Player(board.screen, PLAYER_RED, 'player2',
                               board.location_sets[1])
         self.current_player = self.player1
+        self.current_piece = None
         self.game(board)
 
     def toggle_player(self):
@@ -330,14 +344,25 @@ class Ludo:
             piece.current_tile = piece.target_tile
         piece.tiles_traversed += increment
 
-    def check_collision(attacker, victim):
-        pass
+    def check_and_process_collision(self, attacker, victim):
+        victim_attacked = False
+        for attack_piece in attacker.pieces:
+            for victim_piece in victim.pieces:
+                if attack_piece.location == victim_piece.location:
+                    victim_attacked = True
+                    victim_piece.is_home = True
+                    victim_piece.tiles_traversed = 0
+                    victim_piece.target_home_location = victim.location_set[0]
+                    self.current_piece = victim_piece
+                    break
+            if victim_attacked:
+                break
+        return victim_attacked
 
     def game(self, board):
         turn_under_progress = False
         dice_num = 0
         move_current_piece = False
-        current_piece = None
         done = False
         while not done:
             for event in pygame.event.get():
@@ -357,35 +382,43 @@ class Ludo:
                 if dice_num == 6:
                     player_home_piece = self.current_player.get_home_piece()
                     if player_home_piece:
-                        current_piece = player_home_piece
+                        self.current_piece = player_home_piece
                         if self.current_player == self.player1:
-                            current_piece.target_tile = board.start_tile_player1
+                            self.current_piece.target_tile = board.start_tile_player1
                         else:
-                            current_piece.target_tile = board.start_tile_player2
+                            self.current_piece.target_tile = board.start_tile_player2
                         move_current_piece = True
                     else:
-                        current_piece = self.current_player.get_farthest_piece()
-                        self.increment_piece_target_tile(board, current_piece,
+                        self.current_piece = self.current_player.get_farthest_piece()
+                        self.increment_piece_target_tile(board, self.current_piece,
                                                          dice_num)
                         move_current_piece = True
                 else:
-                    current_piece = self.current_player.get_farthest_piece()
-                    if current_piece:
-                        self.increment_piece_target_tile(board, current_piece,
+                    self.current_piece = self.current_player.get_farthest_piece()
+                    if self.current_piece:
+                        self.increment_piece_target_tile(board, self.current_piece,
                                                          dice_num)
                         move_current_piece = True
                     else:
                         self.toggle_player()
                         turn_under_progress = False
             if move_current_piece:
-                target_reached = current_piece.move_piece(board.screen)
+                target_reached = self.current_piece.move_piece(board.screen)
                 if target_reached is True:
-                    move_current_piece = False
+                    if (self.current_piece.location == board.start_tile_player1.location or
+                        self.current_piece.location == board.start_tile_player2.location):
+                        self.current_piece.is_home = False
+                        self.current_piece.tiles_traversed += 1
+                    if self.current_player == self.player1:
+                        other_player = self.player2
+                    else:
+                        other_player = self.player1
+                    if self.check_and_process_collision(self.current_player,
+                                                        other_player):
+                        pass
+                    else:
+                        move_current_piece = False
                     turn_under_progress = False
-                    if (current_piece.location == board.start_tile_player1.location or
-                        current_piece.location == board.start_tile_player2.location):
-                        current_piece.is_home = False
-                        current_piece.tiles_traversed += 1
                     self.toggle_player()
             board.screen.fill((0, 0, 0))
             board.redraw_pieces(self.player1)
