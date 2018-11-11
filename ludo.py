@@ -1,6 +1,7 @@
 import math
 import pygame
 import random
+import sys
 
 
 SCREEN_SIZE = [600, 600]
@@ -13,7 +14,7 @@ TILE_SIZE = math.floor(ROW_COUNT * 2.25)
 PLAYER_RED = (204, 0, 0)
 PLAYER_BLUE = (51, 51, 255)
 PIECE_SIZE = 13
-MOVE_SPEED = 20
+MOVE_SPEED = 40
 DECELERATION = 0.25
 
 
@@ -32,14 +33,18 @@ class Player:
         return home_piece
 
     def get_farthest_piece(self):
-        farthest_piece = None
-        temp_traversal_arr = []
-        for i in range(0, 4):
-            temp_traversal_arr.append(self.pieces[i].tiles_traversed)
-        index = temp_traversal_arr.index(max(temp_traversal_arr))
-        if index > 0:
-            farthest_piece = self.pieces[index]
-        return farthest_piece
+        temp_pieces_arr = self.pieces[:]
+        for i in range(0, 3):
+            if (temp_pieces_arr[i].tiles_traversed >= \
+               temp_pieces_arr[i+1].tiles_traversed) or \
+               (temp_pieces_arr[i].is_home is False and \
+                temp_pieces_arr[i+1].is_home is True):
+                temp_pieces_arr[i], temp_pieces_arr[i+1] = \
+                        temp_pieces_arr[i+1], temp_pieces_arr[i]
+        if temp_pieces_arr[3].is_home is False:
+            return temp_pieces_arr[3]
+        else:
+            return None
 
     """function should ideally return a piece based on player
     preference, but for now we will push the first piece found
@@ -56,6 +61,7 @@ class Player:
         self.player_name = name
         self.pieces = []
         self.location_set = location_set
+        self.color = color
         for i in range(0, 4):
             self.pieces.append(Piece(screen, self, self.location_set[i], i + 1,
                                      PIECE_SIZE, color))
@@ -65,6 +71,7 @@ class Piece:
 
     def move_piece(self, screen):
         if self.target_tile or self.target_home_location:
+            #print(pygame.time.get_ticks())
             target_location = None
             if self.target_home_location:
                 target_location = self.target_home_location
@@ -81,6 +88,7 @@ class Piece:
                                          (target_location[1] -
                                           self.location[1])**2)
             self.current_move_speed = current_distance * DECELERATION
+            """ Movement correction to avoid linear transitions """
             if current_distance < 10:
                 self.location = [math.ceil(self.location[0] + computed_vector[0] *
                                  self.current_move_speed), math.ceil(self.location[1] +
@@ -312,7 +320,7 @@ class Board:
         self.create_board()
         self.post_processing()
         self.calculate_home_location_sets()
-        self.dice_text = pygame.font.SysFont('Aril', 72)
+        self.dice_text = pygame.font.SysFont('Arial', 72)
         self.dice_text_surf = self.dice_text.render('0', False, PLAYER_BLUE)
 
 
@@ -330,6 +338,9 @@ class Ludo:
                               board.location_sets[1])
         self.current_player = self.player1
         self.current_piece = None
+        self.turn_under_progress = False
+        self.move_current_piece = False
+        self.dice_num = 0
         self.game(board)
 
     def toggle_player(self):
@@ -345,81 +356,87 @@ class Ludo:
         piece.tiles_traversed += increment
 
     def check_and_process_collision(self, attacker, victim):
-        victim_attacked = False
+        collision_count = 0
+        victim_piece = None
         for attack_piece in attacker.pieces:
-            for victim_piece in victim.pieces:
-                if attack_piece.location == victim_piece.location:
-                    victim_attacked = True
-                    victim_piece.is_home = True
-                    victim_piece.tiles_traversed = 0
-                    victim_piece.target_home_location = victim.location_set[0]
-                    self.current_piece = victim_piece
-                    break
-            if victim_attacked:
-                break
-        return victim_attacked
+            for current_victim_piece in victim.pieces:
+                if attack_piece.location == current_victim_piece.location:
+                    victim_piece = current_victim_piece
+                    collision_count += 1
+        """ Only consider it valid attack if victim doesn't have two
+        overlapping pieces at the same location """
+        if collision_count == 1:
+            victim_piece.is_home = True
+            victim_piece.tiles_traversed = 0
+            victim_piece.target_home_location = \
+                    victim_piece.home_location
+            self.current_piece = victim_piece
+            return True
+        else:
+            return False
+
+    def process_dice_throw(self):
+        board.update_dice_text(str(self.dice_num), self.current_player.color)
+        if self.dice_num == 6:
+            player_home_piece = self.current_player.get_home_piece()
+            if player_home_piece:
+                self.current_piece = player_home_piece
+                if self.current_player == self.player1:
+                    self.current_piece.target_tile = board.start_tile_player1
+                else:
+                    self.current_piece.target_tile = board.start_tile_player2
+                self.move_current_piece = True
+            else:
+                self.current_piece = self.current_player.get_farthest_piece()
+                self.increment_piece_target_tile(board, self.current_piece,
+                                                 self.dice_num)
+                self.move_current_piece = True
+        else:
+            self.current_piece = self.current_player.get_farthest_piece()
+            if self.current_piece:
+                self.increment_piece_target_tile(board, self.current_piece,
+                                                 self.dice_num)
+                self.move_current_piece = True
+            else:
+                self.toggle_player()
+                self.turn_under_progress = False
+
+    def process_player_action(self):
+        target_reached = self.current_piece.move_piece(board.screen)
+        if target_reached is True:
+            if (self.current_piece.location == board.start_tile_player1.location or
+                self.current_piece.location == board.start_tile_player2.location):
+                self.current_piece.is_home = False
+                self.current_piece.tiles_traversed += 1
+            if self.current_player == self.player1:
+                other_player = self.player2
+            else:
+                other_player = self.player1
+            if self.check_and_process_collision(self.current_player,
+                                                other_player):
+                pass
+            else:
+                self.move_current_piece = False
+            self.turn_under_progress = False
+            self.toggle_player()
 
     def game(self, board):
-        turn_under_progress = False
-        dice_num = 0
-        move_current_piece = False
         done = False
         while not done:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     done = True
-                if event.type == pygame.KEYDOWN and move_current_piece is False:
+                if event.type == pygame.KEYDOWN and self.move_current_piece is False:
                     if (event.key == pygame.K_SPACE and
-                        turn_under_progress is False):
-                        dice_num = self.roll_dice()
-                        turn_under_progress = True
-            if turn_under_progress and move_current_piece is False:
-                if self.current_player == self.player1:
-                    color = PLAYER_BLUE
-                else:
-                    color = PLAYER_RED
-                board.update_dice_text(str(dice_num), color)
-                if dice_num == 6:
-                    player_home_piece = self.current_player.get_home_piece()
-                    if player_home_piece:
-                        self.current_piece = player_home_piece
-                        if self.current_player == self.player1:
-                            self.current_piece.target_tile = board.start_tile_player1
-                        else:
-                            self.current_piece.target_tile = board.start_tile_player2
-                        move_current_piece = True
-                    else:
-                        self.current_piece = self.current_player.get_farthest_piece()
-                        self.increment_piece_target_tile(board, self.current_piece,
-                                                         dice_num)
-                        move_current_piece = True
-                else:
-                    self.current_piece = self.current_player.get_farthest_piece()
-                    if self.current_piece:
-                        self.increment_piece_target_tile(board, self.current_piece,
-                                                         dice_num)
-                        move_current_piece = True
-                    else:
-                        self.toggle_player()
-                        turn_under_progress = False
-            if move_current_piece:
-                target_reached = self.current_piece.move_piece(board.screen)
-                if target_reached is True:
-                    if (self.current_piece.location == board.start_tile_player1.location or
-                        self.current_piece.location == board.start_tile_player2.location):
-                        self.current_piece.is_home = False
-                        self.current_piece.tiles_traversed += 1
-                    if self.current_player == self.player1:
-                        other_player = self.player2
-                    else:
-                        other_player = self.player1
-                    if self.check_and_process_collision(self.current_player,
-                                                        other_player):
-                        pass
-                    else:
-                        move_current_piece = False
-                    turn_under_progress = False
-                    self.toggle_player()
+                        self.turn_under_progress is False):
+                        self.dice_num = self.roll_dice()
+                        self.turn_under_progress = True
+                    if (event.key == pygame.K_ESCAPE):
+                        sys.exit()
+            if self.turn_under_progress and self.move_current_piece is False:
+                self.process_dice_throw()
+            if self.move_current_piece:
+                self.process_player_action()
             board.screen.fill((0, 0, 0))
             board.redraw_pieces(self.player1)
             board.redraw_pieces(self.player2)
@@ -431,7 +448,7 @@ class Ludo:
                                                      SCREEN_SIZE[1] / 2 -
                                                      TILE_SIZE))
             pygame.display.flip()
-            clock.tick(30)
+            clock.tick(60)
 
 
 if __name__ == "__main__":
